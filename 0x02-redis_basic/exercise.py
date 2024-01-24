@@ -4,8 +4,35 @@ Using redis in python via the redis-py library.
 '''
 import redis
 import uuid
-from typing import Union
+from typing import Union, Callable
+import functools
+import json
 
+
+def count_calls(method):
+    ''' A decorator returning a callable '''
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        ''' Wrapper to increment key. '''
+        key = method.__qualname__
+        self._redis.incr(key)
+        return method(self, *args, **kwargs)
+    return wrapper
+
+def call_history(method: Callable) -> Callable:
+    ''' Defining a history decorator '''
+    @functools.wraps(method)
+    def history_wrapper(self, *args, **kwargs):
+        ''' Adding calls and result to input
+        and output lists '''
+        input_key = method.__qualname__ + ":inputs"
+        output_key = method.__qualname__ + ":outputs"
+        normalized_args = str(args)
+        self._redis.rpush(input_key, normalized_args)
+        output = method(self, *args, **kwargs)
+        self._redis.rpush(output_key, json.dumps(output))
+        return output
+    return history_wrapper
 
 class Cache:
     '''
@@ -18,6 +45,8 @@ class Cache:
         self._redis = redis.Redis()
         self._redis.flushdb()
 
+    @count_calls
+    @call_history
     def store(self, data: Union[str, bytes, int, float]) -> str:
         '''
         A method to store input data in redis and return key.
@@ -25,3 +54,25 @@ class Cache:
         r_key = str(uuid.uuid4())
         self._redis.set(r_key, data)
         return r_key
+
+    def get(self, key: str, fn: Callable = None) -> Union[str,
+            bytes, int, float, None]:
+        '''
+        Retrieving a redis object and converting to desired
+        format using the callback function.
+        '''
+        data = self._redis.get(key)
+        if data is None:
+            return None
+        if fn is not None:
+            return fn(data)
+        return data
+    
+    def get_str(self, key: str) -> Union[str, None]:
+        ''' Returning a string format of the data '''
+        return self.get(key, fn=lambda d: d.decode("utf-8"))
+
+    def get_int(self, key: str) -> Union[int, None]:
+        ''' Returning and integer of the data '''
+        return self.get(key, fn=int)
+
