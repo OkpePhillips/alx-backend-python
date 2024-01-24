@@ -19,6 +19,7 @@ def count_calls(method):
         return method(self, *args, **kwargs)
     return wrapper
 
+
 def call_history(method: Callable) -> Callable:
     ''' Defining a history decorator '''
     @functools.wraps(method)
@@ -33,6 +34,7 @@ def call_history(method: Callable) -> Callable:
         self._redis.rpush(output_key, json.dumps(output))
         return output
     return history_wrapper
+
 
 class Cache:
     '''
@@ -56,7 +58,8 @@ class Cache:
         return r_key
 
     def get(self, key: str, fn: Callable = None) -> Union[str,
-            bytes, int, float, None]:
+                                                          bytes, int,
+                                                          float, None]:
         '''
         Retrieving a redis object and converting to desired
         format using the callback function.
@@ -67,7 +70,7 @@ class Cache:
         if fn is not None:
             return fn(data)
         return data
-    
+
     def get_str(self, key: str) -> Union[str, None]:
         ''' Returning a string format of the data '''
         return self.get(key, fn=lambda d: d.decode("utf-8"))
@@ -76,3 +79,20 @@ class Cache:
         ''' Returning and integer of the data '''
         return self.get(key, fn=int)
 
+
+def replay(method):
+    '''
+    A function to display the history of calls of a particular function.
+    '''
+    method_name = method.__qualname__
+
+    key_inputs = method_name + ":inputs"
+    key_outputs = method_name + ":outputs"
+    inputs = [json.loads(data) for data in cache._redis.lrange(
+                                key_inputs, 0, -1)]
+    outputs = [json.loads(data) for data in cache._redis.lrange(
+                                key_outputs, 0, -1)]
+
+    print(f"{method_name} was called {len(inputs)} times:")
+    for input_args, output in zip(inputs, outputs):
+        print(f"{method_name}(*{input_args}) -> {output}")
